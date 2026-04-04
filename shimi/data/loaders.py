@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from shimi.data.models import LenderProgram, LenderState
+from shimi.data.models import LenderProgram, LenderState, PortfolioPrior
 
 
 def _normalize_column(name: str) -> str:
@@ -117,3 +117,57 @@ def _optional_str(df: pd.DataFrame, col: str, i: int) -> str | None:
         return None
     s = str(v).strip()
     return s or None
+
+
+def load_portfolio_prior_from_csv(path: str | Path) -> PortfolioPrior:
+    """
+    Load :class:`PortfolioPrior` from CSV with columns ``lender_id``, ``prior_funded``,
+    ``prior_fico_weighted`` (Σ amount×loan_FICO on prior loans).
+    """
+    path = Path(path)
+    df = pd.read_csv(path)
+    df.columns = [_normalize_column(c) for c in df.columns]
+    required = {"lender_id", "prior_funded", "prior_fico_weighted"}
+    missing = required - set(df.columns)
+    if missing:
+        raise ValueError(f"Portfolio prior CSV missing columns {sorted(missing)}; have {sorted(df.columns)}")
+
+    df["lender_id"] = df["lender_id"].astype(str).str.strip()
+    funded = pd.to_numeric(df["prior_funded"], errors="coerce")
+    fico_w = pd.to_numeric(df["prior_fico_weighted"], errors="coerce")
+    if funded.isna().any() or fico_w.isna().any():
+        raise ValueError("prior_funded and prior_fico_weighted must be numeric")
+    if (funded < 0).any() or (fico_w < 0).any():
+        raise ValueError("prior amounts must be non-negative")
+
+    by_f = dict(zip(df["lender_id"], funded.astype(float), strict=True))
+    by_w = dict(zip(df["lender_id"], fico_w.astype(float), strict=True))
+    return PortfolioPrior(
+        funded_face_by_lender=by_f,
+        fico_weighted_face_by_lender=by_w,
+    )
+
+
+def load_loan_tape_from_csv(path: str | Path) -> pd.DataFrame:
+    """
+    Load a wide-format loan tape: ``loan_index``, ``loan_fico``, then one column per ``lender_id``
+    with allocated **face** on that loan. Lender column names are **case-preserved** (they must
+    match ``lender_id`` values in the lender book).
+    """
+    path = Path(path)
+    df = pd.read_csv(path)
+    renamed: list[str] = []
+    for c in df.columns:
+        key = _normalize_column(c)
+        if key in ("loan_index", "loan_fico"):
+            renamed.append(key)
+        else:
+            renamed.append(str(c).strip())
+    df.columns = renamed
+    if "loan_index" not in df.columns or "loan_fico" not in df.columns:
+        raise ValueError("Loan tape CSV must include loan_index and loan_fico columns")
+    df["loan_index"] = pd.to_numeric(df["loan_index"], errors="coerce")
+    df["loan_fico"] = pd.to_numeric(df["loan_fico"], errors="coerce")
+    if df["loan_index"].isna().any() or df["loan_fico"].isna().any():
+        raise ValueError("loan_index and loan_fico must be numeric")
+    return df

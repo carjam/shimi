@@ -10,7 +10,7 @@ Shimi addresses this with a **real-time interactive simulator** that models allo
 ## Users / Stakeholders
 - **Risk Team**: Needs to monitor concentration risk, Gini coefficient, and weighted FICO exposure.
 - **Capital Markets / Treasury**: Monitors lender commitments, ensures contractual originators are protected, and uses projected exhaustion metrics for planning.
-- **Program Managers / Underwriters**: Explore allocations dynamically and adjust α/β weights to test trade-offs.
+- **Program Managers / Underwriters**: Explore allocations dynamically and adjust α, β, γ, participation floor, and loan-level FICO to test trade-offs (including fair dealing vs. commitment targets).
 - **Architecture / Engineering Team**: Needs clear understanding of data flow, constraints, and how projections interact with the allocation engine.
 - **Executive Stakeholders**: Visualize program health and risk distribution.
 
@@ -19,14 +19,18 @@ Shimi addresses this with a **real-time interactive simulator** that models allo
 ## In Scope
 - Interactive web-based tool (Streamlit) for loan allocation simulation.
 - Allocation engine solving per-loan Quadratic Program (QP) with:
-  - Objective: weighted combination of deviation from target share, contractual originator protection, and weighted FICO.
+  - Objective: weighted combination of:
+    - **α** — deviation from **target share** (commitment-aligned risk distribution).
+    - **β** — penalty on **contractual originators** for high utilization of remaining line.
+    - **γ (fair dealing, FICO)** — **Each loan has one representative FICO.** Fairness is judged **in aggregate over time**: we want each lender’s **portfolio weighted-average FICO** (Σ face×FICO / Σ face on loans they took) to stay **roughly equal across lenders** as new loans arrive (scores may vary loan-to-loan, e.g. approximately Gaussian). With **cumulative priors** per lender (prior funded face and prior Σ(face×loan FICO)), γ uses a convex penalty that steers the **current** loan’s split toward **rebalancing** those portfolio averages—not favoritism against any counterparty. **Cold start** (no funded history): γ falls back to equal-share nudging on the current loan.
+  - Inputs: loan amount, **loan FICO** for the **current** loan only; lender book; optional **portfolio prior** (cumulative funded and cumulative FICO-weighted face per lender before this loan).
   - Constraints: allocations sum to loan, each ≥ floor, each ≤ remaining commitment.
 - Metrics and visualizations:
   - Per-loan allocations (stacked bar chart)
   - Cumulative allocations / drawdown curves
   - Gini coefficient per loan
   - Weighted FICO per loan
-- Dynamic α/β sliders to explore risk vs. contractual originator protection trade-offs.
+- Dynamic controls for α, β, γ, participation floor, **loan FICO**, and (where supported) **optional cumulative portfolio** inputs per lender for γ’s over-time fair-dealing term.
 - Capital exhaustion projections:
   - Moving average and linear extrapolation methods
   - Alerts for critical lenders approaching depletion
@@ -44,9 +48,9 @@ Shimi addresses this with a **real-time interactive simulator** that models allo
 
 ## Functional Requirements
 1. **Loan Allocation Engine**
-   - Input: loan amount, lender commitments, historical allocation data.
-   - Output: allocation per lender satisfying floor and remaining commitment constraints.
-   - Optimization: quadratic program solved using CVXPY + OSQP.
+   - Input: loan amount; **one loan FICO** per allocation (the score for that loan only); lender commitments, remaining capacity, target shares, contractual-originator flags; optional **portfolio prior** (per lender: cumulative funded face before this loan, cumulative Σ(face×loan FICO) on prior loans); optional historical allocation data for metrics/projections.
+   - Output: allocation per lender satisfying floor and remaining commitment constraints; solver status; loan FICO used; indicator of whether γ applied **portfolio** fair dealing or **cold-start** equal-share fallback.
+   - Optimization: CVXPY + OSQP. **γ** minimizes imbalance in lenders’ **cumulative FICO-mass** relative to a **group** portfolio average when priors exist; otherwise **γ** uses an equal-share proxy on the current loan only.
 
 2. **Metrics Calculation**
    - Compute per-loan and cumulative metrics:
@@ -61,8 +65,8 @@ Shimi addresses this with a **real-time interactive simulator** that models allo
    - Overlay projected exhaustion points on drawdown curves.
 
 4. **Parameter Tuning**
-   - Sliders for α (risk distribution) and β (contractual originator protection).
-   - Update allocations and metrics in real-time.
+   - Controls for α, β, γ (portfolio FICO fair dealing over time when priors are supplied), participation floor, loan FICO, and optional per-lender cumulative portfolio fields.
+   - Update allocations (and metrics when implemented) in real-time as parameters change.
 
 5. **Capital Exhaustion Projections**
    - Calculate estimated loan number when each lender’s commitment reaches zero.
@@ -98,7 +102,7 @@ Shimi addresses this with a **real-time interactive simulator** that models allo
    - Alerts for critical lenders appear when projected exhaustion is near.
 
 4. **Parameter Tuning**
-   - α/β sliders update metrics and charts in real-time without errors.
+   - α, β, γ, participation floor, loan FICO, and optional portfolio-prior inputs update the allocation preview in real time without errors (and metrics/charts when those layers are present).
 
 5. **Projection Accuracy**
    - Moving average and linear extrapolation projections are consistent with historical allocation data.

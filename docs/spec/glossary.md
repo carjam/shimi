@@ -28,7 +28,10 @@ Weight controlling importance of fair risk distribution in the allocation object
 Weight controlling importance of contractual originator protection in the allocation objective.
 
 **Weighted FICO**  
-Metric representing the impact of lenders’ credit quality, computed as FICO % × $ allocated.
+For a single loan, how much credit-quality exposure a lender takes via that loan: use the loan’s one representative FICO with that lender’s share and face amount. **Portfolio** weighted-average FICO for a lender is Σ(face×loan FICO)/Σ(face) over loans they funded. **γ (gamma)** targets **equal portfolio averages across lenders over time** (with optional **portfolio priors** in the engine); cold start uses equal-share proxy on the current loan only.
+
+**Portfolio prior (allocation)**  
+Per lender, before the current loan: cumulative **funded face** and cumulative **Σ(face × loan FICO)** on all prior loans—inputs that let the γ term rebalance **cross-lender** portfolio weighted-average FICO.
 
 **Gini Coefficient**  
 Measure of inequality in allocations; higher values indicate concentration risk.

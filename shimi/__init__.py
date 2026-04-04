@@ -1,3 +1,3 @@
 """Shimi — loan allocation simulation core."""
 
-__all__ = ["data"]
+__all__ = ["allocation", "data"]

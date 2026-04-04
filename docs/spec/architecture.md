@@ -23,7 +23,7 @@ It is designed for **clarity, interactivity, and auditability**, while remaining
   - **Objective Function**:
     - Minimize weighted deviation from target share (fair risk distribution).  
     - Penalize depletion of contractual originators (protection weight β).  
-    - Include weighted FICO impact (optional cost function).
+    - Optional **fair-dealing FICO term** (weight γ): **each loan carries one FICO**; fairness is **aggregate over time**. Given **portfolio priors** (per lender: cumulative funded face and cumulative Σ(face×loan FICO) before the current loan), γ penalizes squared imbalances in ``F_i + x_i f - μ(A_i + x_i)`` (convex in allocations), steering the new loan so **portfolio weighted-average FICO** tends to stay **similar across lenders**. **Cold start** (no prior funded history): γ falls back to equal-share nudging on the current loan.
   - **Constraints**:
     - Participation floor (e.g., ≥ 5%).  
     - Remaining commitment per lender.  

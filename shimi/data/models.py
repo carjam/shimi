@@ -9,6 +9,20 @@ import pandas as pd
 from shimi.data.history import AllocationHistory
 
 
+@dataclass(frozen=True)
+class PortfolioPrior:
+    """Cumulative portfolio *before* allocating the current loan (per lender).
+
+    - ``funded_face_by_lender[i]`` — total principal allocated to lender *i* on **prior** loans (A_i).
+    - ``fico_weighted_face_by_lender[i]`` — sum over prior loans of *(amount to i × that loan's FICO)* (F_i).
+
+    Portfolio weighted-average FICO for lender *i* is ``F_i / A_i`` when ``A_i > 0``.
+    """
+
+    funded_face_by_lender: dict[str, float]
+    fico_weighted_face_by_lender: dict[str, float]
+
+
 @dataclass
 class LenderState:
     """Single lender row used as authoritative input and live simulation state."""
@@ -71,8 +85,12 @@ class LenderProgram:
         amounts_by_lender: dict[str, float],
         *,
         loan_index: int | None = None,
+        loan_fico: float | None = None,
     ) -> None:
-        """Subtract allocated amounts from remaining_commitment and record history."""
+        """Subtract allocated amounts from remaining_commitment and record history.
+
+        ``loan_fico`` is stored on the history row for fair-dealing priors and metrics.
+        """
         ids = set(self.lenders)
         if set(amounts_by_lender) != ids:
             missing = ids - set(amounts_by_lender)
@@ -98,4 +116,5 @@ class LenderProgram:
             self.history,
             loan_index=loan_index,
             amounts_by_lender=amounts_by_lender,
+            loan_fico=loan_fico,
         )
