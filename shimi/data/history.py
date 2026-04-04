@@ -1,7 +1,12 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import numpy as np
 import pandas as pd
+
+if TYPE_CHECKING:
+    from shimi.data.models import LenderProgram
 
 
 class AllocationHistory:
@@ -49,3 +54,41 @@ class AllocationHistory:
         }
         added = pd.DataFrame([row], columns=history.columns)
         return pd.concat([history, added], ignore_index=True)
+
+
+def replay_allocation_history(program: LenderProgram, history: pd.DataFrame) -> None:
+    """Apply each row of a wide history table via :meth:`LenderProgram.apply_loan_allocation`.
+
+    Rows are processed in ``loan_index`` order. Intended for a **fresh** program (empty
+    ``history``) so remaining lines stay consistent with the replayed allocations.
+
+    Raises ``ValueError`` if required columns are missing or ``loan_index`` values duplicate.
+    """
+    if history.shape[0] == 0:
+        return
+
+    ids = sorted(program.lenders.keys())
+    cols = set(history.columns)
+    for req in (AllocationHistory.INDEX_COL, AllocationHistory.FICO_COL):
+        if req not in cols:
+            raise ValueError(f"History missing column {req!r}")
+    for lid in ids:
+        if lid not in cols:
+            raise ValueError(f"History missing lender column {lid!r}")
+
+    h = history.sort_values(AllocationHistory.INDEX_COL, ignore_index=True)
+    seen: set[int] = set()
+    for _, row in h.iterrows():
+        li = int(row[AllocationHistory.INDEX_COL])
+        if li in seen:
+            raise ValueError(f"Duplicate loan_index in history: {li}")
+        seen.add(li)
+        amounts = {lid: float(row[lid]) for lid in ids}
+        raw_fico = row[AllocationHistory.FICO_COL]
+        loan_fico: float | None
+        if pd.isna(raw_fico):
+            loan_fico = None
+        else:
+            fv = float(raw_fico)
+            loan_fico = fv if np.isfinite(fv) else None
+        program.apply_loan_allocation(amounts, loan_index=li, loan_fico=loan_fico)

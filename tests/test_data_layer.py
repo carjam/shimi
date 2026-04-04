@@ -13,6 +13,7 @@ from shimi.data import (
     load_loan_tape_from_csv,
     load_portfolio_prior_from_csv,
     portfolio_prior_from_loan_tape,
+    replay_allocation_history,
 )
 from shimi.data.history import AllocationHistory
 
@@ -199,3 +200,27 @@ def test_portfolio_prior_from_tape_missing_lender_column_raises() -> None:
     tape = pd.DataFrame({"loan_index": [0], "loan_fico": [700.0]})
     with pytest.raises(ValueError, match="missing columns"):
         portfolio_prior_from_loan_tape(tape, ["L001", "L002"])
+
+
+def test_replay_allocation_history_updates_remaining_and_rows() -> None:
+    prog = load_lender_program_from_csv(SAMPLE_CSV)
+    tape = load_loan_tape_from_csv(SAMPLE_LOANS)
+    tape_two = tape.loc[tape["loan_index"] <= 1].copy()
+    r0 = {lid: prog.lenders[lid].remaining_commitment for lid in prog.lenders}
+    replay_allocation_history(prog, tape_two)
+    assert prog.history.shape[0] == 2
+    per_loan = 1.0 + 2.4 + 0.7 + 1.6
+    assert prog.lenders["L001"].remaining_commitment == pytest.approx(r0["L001"] - 2 * 1.0)
+    assert prog.lenders["L002"].remaining_commitment == pytest.approx(r0["L002"] - 2 * 2.4)
+
+
+def test_replay_allocation_history_rejects_duplicate_loan_index() -> None:
+    prog = load_lender_program_from_csv(SAMPLE_CSV)
+    bad = pd.DataFrame(
+        [
+            {"loan_index": 0, "loan_fico": 700.0, "L001": 1.0, "L002": 1.0, "L003": 1.0, "L004": 1.0},
+            {"loan_index": 0, "loan_fico": 700.0, "L001": 1.0, "L002": 1.0, "L003": 1.0, "L004": 1.0},
+        ]
+    )
+    with pytest.raises(ValueError, match="Duplicate loan_index"):
+        replay_allocation_history(prog, bad)

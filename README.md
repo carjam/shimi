@@ -15,6 +15,7 @@ Shimi/
 ├── data/
 │   ├── sample_lenders.csv        # Lender book snapshot
 │   ├── sample_loans.csv          # Loan tape (loan_fico + face per lender)
+│   ├── sample_allocation_history.csv  # Optional replay into book (demo history / remaining)
 │   ├── sample_portfolio_prior.csv # Cumulative Σface & Σ(face×FICO) per lender
 │   └── README.md                 # Describes the sample files
 ├── docs/

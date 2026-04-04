@@ -1,6 +1,6 @@
 """Data layer: lenders, program state, and allocation history."""
 
-from shimi.data.history import AllocationHistory
+from shimi.data.history import AllocationHistory, replay_allocation_history
 from shimi.data.loaders import (
     load_lender_program_from_csv,
     load_loan_tape_from_csv,
@@ -11,6 +11,7 @@ from shimi.data.tape import portfolio_prior_from_loan_tape
 
 __all__ = [
     "AllocationHistory",
+    "replay_allocation_history",
     "LenderProgram",
     "LenderState",
     "PortfolioPrior",

@@ -23,6 +23,7 @@ from shimi.data import (
     load_loan_tape_from_csv,
     load_portfolio_prior_from_csv,
     portfolio_prior_from_loan_tape,
+    replay_allocation_history,
 )
 from shimi.data.history import AllocationHistory
 from shimi.data.models import LenderProgram
@@ -31,6 +32,7 @@ from shimi.metrics import aggregate_metrics_for_window, cumulative_funded_by_len
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 LENDERS_CSV = DATA_DIR / "sample_lenders.csv"
 LOANS_CSV = DATA_DIR / "sample_loans.csv"
+HISTORY_CSV = DATA_DIR / "sample_allocation_history.csv"
 PRIOR_CSV = DATA_DIR / "sample_portfolio_prior.csv"
 
 
@@ -295,7 +297,8 @@ def main() -> None:
         "Interactive loan allocation simulator — lender book, optional **loan tape**, and **portfolio "
         "priors** load from `data/` (see `data/README.md`). Open **View source data** for CSV snapshots. "
         "**Inputs** are on the **left**; **live output** (metrics and charts) stays on the **right** so you can "
-        "dial parameters and see impact without scrolling."
+        "dial parameters and see impact without scrolling. If `sample_allocation_history.csv` is present, past "
+        "loans are **replayed** into the book so **remaining lines**, **History metrics**, and **exhaustion** align."
     )
 
     if not LENDERS_CSV.exists():
@@ -309,6 +312,12 @@ def main() -> None:
         return
 
     ids = _lender_ids(program)
+    if HISTORY_CSV.exists():
+        try:
+            hist_seed = load_loan_tape_from_csv(HISTORY_CSV)
+            replay_allocation_history(program, hist_seed)
+        except ValueError as e:
+            st.warning(f"Could not replay `{HISTORY_CSV.name}`: {e}")
 
     loan_tape_df: pd.DataFrame | None = None
     with st.expander("View source data (lenders & loan tape)", expanded=False):
@@ -566,8 +575,9 @@ def main() -> None:
         with st.expander("History metrics", expanded=False):
             st.caption(
                 "**Gini** measures concentration of each loan’s split across lenders (0 = even, higher = more skewed). "
-                "**Cumulative funded** sums face from past rows. The loaded book’s `history` starts empty unless you "
-                "apply allocations from code—or use the sample loan tape below for a demo series."
+                "**Cumulative funded** sums face from past rows. If `sample_allocation_history.csv` was replayed at "
+                "startup, **in-memory history** already lists those loans and **remaining** lines are reduced accordingly. "
+                "You can still use the loan-tape checkbox to analyze the tape as an alternate series."
             )
             use_tape_for_metrics = False
             if loan_tape_df is not None and not loan_tape_df.empty:
