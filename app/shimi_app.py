@@ -2,14 +2,22 @@
 
 from __future__ import annotations
 
+from datetime import date, timedelta
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import plotly.colors as pc
 import plotly.graph_objects as go
 import streamlit as st
 
-from shimi.allocation import AllocationParams, PortfolioPrior, allocate_loan
+from shimi.allocation import (
+    AllocationParams,
+    PortfolioPrior,
+    allocate_loan,
+    per_lender_exhaustion_summary,
+    run_exhaustion_simulation,
+)
 from shimi.data import (
     load_lender_program_from_csv,
     load_loan_tape_from_csv,
@@ -73,6 +81,120 @@ def _fig_target_vs_suggested(
         margin=dict(t=48, b=36, l=48, r=16),
         height=height,
     )
+    return fig
+
+
+def _lender_qualitative_colors() -> list[str]:
+    base = list(pc.qualitative.Plotly)
+    extra = getattr(pc.qualitative, "Dark24", ())
+    return base + list(extra)
+
+
+def _fig_remaining_trajectory_loans(
+    trajectory: list[dict[str, float]],
+    lender_ids: list[str],
+    id_to_name: dict[str, str],
+    *,
+    height: int = 340,
+) -> go.Figure | None:
+    if not trajectory:
+        return None
+    colors = _lender_qualitative_colors()
+    fig = go.Figure()
+    for i, lid in enumerate(lender_ids):
+        c = colors[i % len(colors)]
+        y0 = float(trajectory[0][lid])
+        fig.add_trace(
+            go.Scatter(
+                x=[0],
+                y=[y0],
+                mode="markers",
+                name=f"{id_to_name[lid]} — now",
+                legendgroup=lid,
+                marker=dict(size=12, color=c, symbol="circle", line=dict(width=1, color="white")),
+            )
+        )
+        if len(trajectory) > 1:
+            xs = list(range(1, len(trajectory)))
+            ys = [float(trajectory[k][lid]) for k in range(1, len(trajectory))]
+            fig.add_trace(
+                go.Scatter(
+                    x=xs,
+                    y=ys,
+                    mode="lines",
+                    name=f"{id_to_name[lid]} — projected",
+                    legendgroup=lid,
+                    line=dict(color=c, dash="dash", width=2.5),
+                )
+            )
+    fig.update_layout(
+        title=dict(text="Remaining line: now vs projected (by loan #)", font=dict(size=14)),
+        xaxis_title="Loan # after close (0 = current book)",
+        yaxis_title="Remaining capital",
+        height=height,
+        margin=dict(t=56, b=52, l=64, r=8),
+        legend=dict(orientation="v", yanchor="top", y=1, xanchor="left", x=1.01),
+        hovermode="x unified",
+    )
+    return fig
+
+
+def _fig_remaining_trajectory_dates(
+    trajectory: list[dict[str, float]],
+    lender_ids: list[str],
+    id_to_name: dict[str, str],
+    *,
+    as_of: date,
+    first_loan_date: date,
+    interval_days: int,
+    height: int = 340,
+) -> go.Figure | None:
+    if not trajectory:
+        return None
+    if interval_days < 1:
+        interval_days = 1
+    colors = _lender_qualitative_colors()
+    fig = go.Figure()
+    as_of_ts = pd.Timestamp(as_of)
+    for i, lid in enumerate(lender_ids):
+        c = colors[i % len(colors)]
+        y0 = float(trajectory[0][lid])
+        fig.add_trace(
+            go.Scatter(
+                x=[as_of_ts],
+                y=[y0],
+                mode="markers",
+                name=f"{id_to_name[lid]} — now",
+                legendgroup=lid,
+                marker=dict(size=12, color=c, symbol="circle", line=dict(width=1, color="white")),
+            )
+        )
+        if len(trajectory) > 1:
+            xs = [
+                pd.Timestamp(first_loan_date + timedelta(days=interval_days * j))
+                for j in range(len(trajectory) - 1)
+            ]
+            ys = [float(trajectory[j + 1][lid]) for j in range(len(trajectory) - 1)]
+            fig.add_trace(
+                go.Scatter(
+                    x=xs,
+                    y=ys,
+                    mode="lines",
+                    name=f"{id_to_name[lid]} — projected",
+                    legendgroup=lid,
+                    line=dict(color=c, dash="dash", width=2.5),
+                )
+            )
+    fig.update_layout(
+        title=dict(text="Remaining line: now vs projected (calendar)", font=dict(size=14)),
+        xaxis_title="Date",
+        yaxis_title="Remaining capital",
+        height=height,
+        margin=dict(t=56, b=52, l=64, r=8),
+        legend=dict(orientation="v", yanchor="top", y=1, xanchor="left", x=1.01),
+        hovermode="x unified",
+    )
+    fig.update_xaxes(type="date")
     return fig
 
 
@@ -396,6 +518,125 @@ def main() -> None:
             hide_index=True,
             use_container_width=True,
         )
+
+        with st.expander("Capital exhaustion forecast", expanded=False):
+            st.caption(
+                "Projects when each lender’s **remaining line** hits zero if you book **repeated loans** of the "
+                "same size with the **same** α, β, γ, floor, and loan FICO. The optimizer is **re-run each loan** "
+                "(caps change). The portfolio **prior for γ is fixed** (not rolled forward with new volume)."
+            )
+            max_fc = st.number_input(
+                "Max loans to simulate",
+                min_value=50,
+                max_value=50_000,
+                value=2_000,
+                step=50,
+                help="Stops early if the next loan is infeasible or every line is depleted.",
+            )
+            exh_view = st.radio(
+                "Exhaustion chart",
+                ["Loan index", "Calendar"],
+                horizontal=True,
+                help="Loan index: x = loan count after each close. Calendar: map loans to dates (schedule below).",
+            )
+            book_as_of = date.today()
+            first_close_date = date.today()
+            days_between_closes = 30
+            if exh_view == "Calendar":
+                dc1, dc2, dc3 = st.columns(3)
+                with dc1:
+                    book_as_of = st.date_input(
+                        "Book as-of",
+                        value=date.today(),
+                        help="Date for **now** markers (current remaining line).",
+                    )
+                with dc2:
+                    first_close_date = st.date_input(
+                        "First modeled close",
+                        value=date.today(),
+                        help="Date when the first simulated loan is assumed to fund.",
+                    )
+                with dc3:
+                    days_between_closes = int(
+                        st.number_input(
+                            "Days between closes",
+                            min_value=1,
+                            max_value=3650,
+                            value=30,
+                            step=1,
+                            help="Spacing between successive simulated loan closes on the timeline.",
+                        )
+                    )
+
+            sim_ex = run_exhaustion_simulation(
+                program,
+                loan_amt,
+                params,
+                loan_fico=loan_fico,
+                portfolio_prior=portfolio_prior,
+                max_loans=int(max_fc),
+            )
+            fcst = per_lender_exhaustion_summary(program, sim_ex)
+            fc_meta = {
+                "loans_simulated": sim_ex.loans_simulated,
+                "stop_reason": sim_ex.stop_reason,
+                "max_loans": sim_ex.max_loans,
+            }
+            disp = fcst.rename(
+                columns={
+                    "remaining_line": "Remaining",
+                    "draw_loan_1": "Modeled $ (loan 1)",
+                    "loans_until_depleted": "Loans to deplete (sim)",
+                    "approx_loans_flat_draw": "Flat-draw loans (approx)",
+                    "avg_hist_draw_per_loan": "Hist avg $/loan",
+                    "approx_loans_at_hist_avg": "Loans @ hist avg (approx)",
+                }
+            )
+            st.caption(
+                f"Simulated **{fc_meta['loans_simulated']}** loans · stop: **`{fc_meta['stop_reason']}`** "
+                f"· horizon cap: **{fc_meta['max_loans']}**."
+            )
+            show_hist = bool(disp["Hist avg $/loan"].notna().any())
+            show_cols = [
+                "name",
+                "Remaining",
+                "Modeled $ (loan 1)",
+                "Loans to deplete (sim)",
+                "Flat-draw loans (approx)",
+            ]
+            if show_hist:
+                show_cols.extend(["Hist avg $/loan", "Loans @ hist avg (approx)"])
+            st.dataframe(
+                disp[show_cols],
+                column_config={
+                    "Remaining": st.column_config.NumberColumn(format="%.2f"),
+                    "Modeled $ (loan 1)": st.column_config.NumberColumn(format="%.2f"),
+                    "Loans to deplete (sim)": st.column_config.NumberColumn(format="%.0f"),
+                    "Flat-draw loans (approx)": st.column_config.NumberColumn(format="%.1f"),
+                    "Hist avg $/loan": st.column_config.NumberColumn(format="%.2f"),
+                    "Loans @ hist avg (approx)": st.column_config.NumberColumn(format="%.1f"),
+                },
+                hide_index=True,
+                use_container_width=True,
+            )
+            id_to_name = dict(zip(disp["lender_id"].astype(str), disp["name"].astype(str), strict=True))
+            traj_ids = sorted(id_to_name.keys())
+            if exh_view == "Loan index":
+                tr_fig = _fig_remaining_trajectory_loans(sim_ex.trajectory, traj_ids, id_to_name, height=360)
+            else:
+                tr_fig = _fig_remaining_trajectory_dates(
+                    sim_ex.trajectory,
+                    traj_ids,
+                    id_to_name,
+                    as_of=book_as_of,
+                    first_loan_date=first_close_date,
+                    interval_days=days_between_closes,
+                    height=360,
+                )
+            if tr_fig is not None:
+                st.plotly_chart(tr_fig, use_container_width=True)
+            if sim_ex.loans_simulated == 0:
+                st.caption("Projection line starts after the first successful simulated loan (none run yet).")
 
         post = _post_loan_portfolio_avg(portfolio_prior, result.amounts_by_lender, result.loan_fico, ids)
         if post is not None and post["avg_fico_after"].notna().any():
