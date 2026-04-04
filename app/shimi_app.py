@@ -24,7 +24,9 @@ from shimi.data import (
     load_portfolio_prior_from_csv,
     portfolio_prior_from_loan_tape,
 )
+from shimi.data.history import AllocationHistory
 from shimi.data.models import LenderProgram
+from shimi.metrics import aggregate_metrics_for_window, cumulative_funded_by_lender, gini_series_by_loan
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 LENDERS_CSV = DATA_DIR / "sample_lenders.csv"
@@ -34,6 +36,27 @@ PRIOR_CSV = DATA_DIR / "sample_portfolio_prior.csv"
 
 def _lender_ids(program: LenderProgram) -> list[str]:
     return sorted(program.lenders.keys())
+
+
+def _history_for_metrics(
+    program: LenderProgram,
+    loan_tape_df: pd.DataFrame | None,
+    *,
+    use_sample_tape: bool,
+) -> tuple[pd.DataFrame | None, str]:
+    """Return (history-like DataFrame, source tag) for ``shimi.metrics``; source is ``tape``, ``memory``, or reason."""
+    ids = _lender_ids(program)
+    if use_sample_tape:
+        if loan_tape_df is None or loan_tape_df.empty:
+            return None, "no_tape"
+        req = [AllocationHistory.INDEX_COL, AllocationHistory.FICO_COL, *ids]
+        missing = [c for c in req if c not in loan_tape_df.columns]
+        if missing:
+            return None, f"missing:{','.join(missing)}"
+        return loan_tape_df[req].copy(), "tape"
+    if program.history.shape[0] > 0:
+        return program.history.copy(), "memory"
+    return None, "empty"
 
 
 def _build_output_table(
@@ -539,6 +562,57 @@ def main() -> None:
             hide_index=True,
             use_container_width=True,
         )
+
+        with st.expander("History metrics", expanded=False):
+            st.caption(
+                "**Gini** measures concentration of each loan’s split across lenders (0 = even, higher = more skewed). "
+                "**Cumulative funded** sums face from past rows. The loaded book’s `history` starts empty unless you "
+                "apply allocations from code—or use the sample loan tape below for a demo series."
+            )
+            use_tape_for_metrics = False
+            if loan_tape_df is not None and not loan_tape_df.empty:
+                use_tape_for_metrics = st.checkbox(
+                    "Use sample loan tape as history (metrics only)",
+                    value=False,
+                    help="Treats rows in sample_loans.csv like past allocations; does not change the QP or exhaustion book state.",
+                )
+            hist_m, hist_src = _history_for_metrics(
+                program, loan_tape_df, use_sample_tape=use_tape_for_metrics
+            )
+            if hist_m is None:
+                if hist_src == "no_tape":
+                    st.warning("No loan tape loaded; cannot use tape-based metrics.")
+                elif hist_src.startswith("missing:"):
+                    st.warning(f"Loan tape is missing columns for metrics: `{hist_src.split(':', 1)[1]}`.")
+                else:
+                    st.info(
+                        "No rows to analyze. Enable **Use sample loan tape** above, or build "
+                        "`program.history` via `apply_loan_allocation` in code."
+                    )
+            else:
+                src_label = "**sample_loans.csv**" if hist_src == "tape" else "**in-memory history**"
+                st.caption(f"Source: {src_label} · {hist_m.shape[0]} loan(s)")
+                agg = aggregate_metrics_for_window(hist_m, window=None)
+                gs = gini_series_by_loan(hist_m)
+                last_gini = float(gs.iloc[-1]) if len(gs) > 0 else float("nan")
+                mg1, mg2, mg3 = st.columns(3)
+                mg1.metric("Loans in series", f"{int(agg['n_loans'])}")
+                mg2.metric("Mean Gini (amounts)", f"{agg['mean_gini_amounts']:.3f}")
+                mg3.metric("Gini (last loan)", f"{last_gini:.3f}")
+                mg3.caption("Concentration on the latest row")
+                st.metric("Total funded (series)", f"{agg['total_funded_all_lenders']:.2f}")
+                cum = cumulative_funded_by_lender(hist_m)
+                tail_n = min(8, len(cum))
+                st.markdown("**Cumulative funded face** (tail of series)")
+                st.dataframe(
+                    cum.tail(tail_n),
+                    column_config={
+                        "loan_index": st.column_config.NumberColumn("Loan #"),
+                        "loan_fico": st.column_config.NumberColumn("Loan FICO", format="%.0f"),
+                    },
+                    hide_index=True,
+                    use_container_width=True,
+                )
 
         with st.expander("Capital exhaustion forecast", expanded=False):
             st.caption(

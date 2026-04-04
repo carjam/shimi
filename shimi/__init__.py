@@ -1,3 +1,5 @@
 """Shimi — loan allocation simulation core."""
 
-__all__ = ["allocation", "data"]
+from shimi import allocation, data, metrics
+
+__all__ = ["allocation", "data", "metrics"]

@@ -32,14 +32,14 @@ It is designed for **clarity, interactivity, and auditability**, while remaining
 - Supports **mixed-integer style behavior** via rounding heuristics for minimal slivers.
 
 ### 3. Metrics Layer
-- Calculates real-time metrics:
-  - **Gini coefficient** → concentration risk per loan or rolling window.
-  - **Weighted FICO** → aggregate exposure per loan.
-  - **Cumulative allocations / drawdown curves**.
-  - **Projected capital exhaustion**:
-    - Moving average of historical allocation per lender.
-    - Linear regression extrapolation for trend-based projection.
-  - Alerts if contractual originators or critical lenders approach zero commitment.
+- Implemented in package **`shimi.metrics`** (pure functions over allocation history and dicts):
+  - **Gini coefficient** on nonnegative amounts or shares (per loan or series across history).
+  - **FICO-weighted face** per lender and total for one loan (`face × loan_fico`).
+  - **Cumulative funded** per lender after each historical row; **remaining commitment** trajectory given initial remaining.
+  - **Rolling / tail window** helper over history; **aggregate** summary (mean Gini, totals) for a window.
+- **Presentation** (Streamlit charts for Gini/drawdown lines) remains optional; metrics are importable without the UI.
+- **Projected capital exhaustion** in the app uses the separate **allocation replay** simulator (`shimi.allocation.exhaustion`), not moving-average/linear-only methods.
+- Alerts for critical lenders are not implemented yet.
 
 ### 4. Presentation Layer
 - **Streamlit-based UI**:

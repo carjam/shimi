@@ -10,7 +10,8 @@ Shimi/
 │   └── shimi_app.py       # Main Streamlit app
 ├── shimi/                 # Core package (data, allocation, metrics)
 │   ├── data/              # Lender program & allocation history
-│   └── allocation/        # Per-loan QP (CVXPY + OSQP)
+│   ├── allocation/        # Per-loan QP (CVXPY + OSQP)
+│   └── metrics/           # Gini, FICO-weighted face, cumulative funded / remaining from history
 ├── data/
 │   ├── sample_lenders.csv        # Lender book snapshot
 │   ├── sample_loans.csv          # Loan tape (loan_fico + face per lender)
