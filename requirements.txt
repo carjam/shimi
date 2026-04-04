@@ -1,0 +1,6 @@
+pandas>=2.0,<3
+streamlit
+numpy
+matplotlib
+cvxpy
+scikit-optimize

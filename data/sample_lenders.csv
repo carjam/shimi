@@ -1,0 +1,5 @@
+lender_id,name,region,asset_class,risk_tier,limit_musd
+L001,North Pacific Credit,APAC,Corporate,B,50.0
+L002,Atlas Capital Partners,EMEA,Sovereign,A,120.0
+L003,Riverstone Lending,Americas,Real Estate,BB,35.5
+L004,Meridian Trust Co.,APAC,Structured,A-,80.0

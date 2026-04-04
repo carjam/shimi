@@ -3,6 +3,10 @@ __pycache__/
 *.py[codz]
 *$py.class
 
+# Local SQLite DBs & OS junk
+*.sqlite3
+.DS_Store
+
 # C extensions
 *.so
 
@@ -58,7 +62,6 @@ cover/
 # Django stuff:
 *.log
 local_settings.py
-db.sqlite3
 db.sqlite3-journal
 
 # Flask stuff:
@@ -136,6 +139,7 @@ celerybeat.pid
 
 # Environments
 .env
+.env.*
 .envrc
 .venv
 env/
