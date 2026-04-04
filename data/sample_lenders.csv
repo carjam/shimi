@@ -1,5 +1,5 @@
-lender_id,name,region,asset_class,risk_tier,limit_musd
-L001,North Pacific Credit,APAC,Corporate,B,50.0
-L002,Atlas Capital Partners,EMEA,Sovereign,A,120.0
-L003,Riverstone Lending,Americas,Real Estate,BB,35.5
-L004,Meridian Trust Co.,APAC,Structured,A-,80.0
+lender_id,name,total_commitment,remaining_commitment,is_contractual_originator,avg_fico,region,asset_class,risk_tier
+L001,North Pacific Credit,50.0,50.0,false,715,APAC,Corporate,B
+L002,Atlas Capital Partners,120.0,120.0,true,755,EMEA,Sovereign,A
+L003,Riverstone Lending,35.5,35.5,false,705,Americas,Real Estate,BB
+L004,Meridian Trust Co.,80.0,80.0,false,738,APAC,Structured,A-

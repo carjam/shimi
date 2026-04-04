@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "shimi"
+version = "0.1.0"
+description = "Interactive loan allocation simulator"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["shimi*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
