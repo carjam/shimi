@@ -115,16 +115,19 @@ def _fig_remaining_trajectory_loans(
             )
         )
         if len(trajectory) > 1:
-            xs = list(range(1, len(trajectory)))
-            ys = [float(trajectory[k][lid]) for k in range(1, len(trajectory))]
+            # Include k=0 so the line has ≥2 points; Plotly draws nothing for mode="lines" with one point.
+            xs = list(range(len(trajectory)))
+            ys = [float(trajectory[k][lid]) for k in range(len(trajectory))]
             fig.add_trace(
                 go.Scatter(
                     x=xs,
                     y=ys,
-                    mode="lines",
+                    mode="lines+markers",
                     name=f"{id_to_name[lid]} — projected",
                     legendgroup=lid,
                     line=dict(color=c, dash="dash", width=2.5),
+                    marker=dict(color=c, size=[0] + [5] * (len(xs) - 1)),
+                    hovertemplate="%{y:.2f}<extra></extra>",
                 )
             )
     fig.update_layout(
@@ -132,8 +135,15 @@ def _fig_remaining_trajectory_loans(
         xaxis_title="Loan # after close (0 = current book)",
         yaxis_title="Remaining capital",
         height=height,
-        margin=dict(t=56, b=52, l=64, r=8),
-        legend=dict(orientation="v", yanchor="top", y=1, xanchor="left", x=1.01),
+        margin=dict(t=56, b=120, l=64, r=24),
+        legend=dict(
+            orientation="h",
+            yanchor="top",
+            y=-0.2,
+            xanchor="center",
+            x=0.5,
+            font=dict(size=10),
+        ),
         hovermode="x unified",
     )
     return fig
@@ -170,19 +180,23 @@ def _fig_remaining_trajectory_dates(
             )
         )
         if len(trajectory) > 1:
-            xs = [
+            xs = [as_of_ts] + [
                 pd.Timestamp(first_loan_date + timedelta(days=interval_days * j))
                 for j in range(len(trajectory) - 1)
             ]
-            ys = [float(trajectory[j + 1][lid]) for j in range(len(trajectory) - 1)]
+            ys = [float(trajectory[0][lid])] + [
+                float(trajectory[j + 1][lid]) for j in range(len(trajectory) - 1)
+            ]
             fig.add_trace(
                 go.Scatter(
                     x=xs,
                     y=ys,
-                    mode="lines",
+                    mode="lines+markers",
                     name=f"{id_to_name[lid]} — projected",
                     legendgroup=lid,
                     line=dict(color=c, dash="dash", width=2.5),
+                    marker=dict(color=c, size=[0] + [5] * (len(xs) - 1)),
+                    hovertemplate="%{y:.2f}<extra></extra>",
                 )
             )
     fig.update_layout(
@@ -190,8 +204,15 @@ def _fig_remaining_trajectory_dates(
         xaxis_title="Date",
         yaxis_title="Remaining capital",
         height=height,
-        margin=dict(t=56, b=52, l=64, r=8),
-        legend=dict(orientation="v", yanchor="top", y=1, xanchor="left", x=1.01),
+        margin=dict(t=56, b=120, l=64, r=24),
+        legend=dict(
+            orientation="h",
+            yanchor="top",
+            y=-0.22,
+            xanchor="center",
+            x=0.5,
+            font=dict(size=10),
+        ),
         hovermode="x unified",
     )
     fig.update_xaxes(type="date")
