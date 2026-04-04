@@ -2,6 +2,12 @@
 
 Capital Concentration Decision Engine — 資本密度意思決定エンジン — Shimi
 
+## Simulation workspace (UI)
+
+The Streamlit app uses a **wide two-column layout**: parameters on the left, live solver output (metrics, charts, tables) on the right. Below is an **illustrative mockup** of that feedback loop—not a pixel-perfect capture of your machine; run the app locally for the real UI.
+
+![Illustrative mockup of the Shimi Streamlit simulation workspace](docs/images/shimi-workspace-mockup.png)
+
 ## Layout
 
 ```
@@ -19,6 +25,7 @@ Shimi/
 │   ├── sample_portfolio_prior.csv # Cumulative Σface & Σ(face×FICO) per lender
 │   └── README.md                 # Describes the sample files
 ├── docs/
+│   ├── images/            # README UI mockup (replace with your own screenshot if you prefer)
 │   ├── spec/              # Requirements, architecture, glossary
 │   └── notes/             # Draft / scratch markdown
 ├── tests/                 # Pytest
