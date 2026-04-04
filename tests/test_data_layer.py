@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import numpy as np
+import pandas as pd
 import pytest
 
 from shimi.data import (
@@ -101,3 +103,99 @@ def test_load_portfolio_prior_and_loan_tape_samples() -> None:
         assert derived.fico_weighted_face_by_lender[lid] == pytest.approx(
             prior.fico_weighted_face_by_lender[lid]
         )
+
+
+def test_lender_program_rejects_duplicate_ids() -> None:
+    dup = [
+        LenderState("A", "One", 10.0, 10.0, 1.0, False, 700.0),
+        LenderState("A", "Two", 10.0, 10.0, 1.0, False, 700.0),
+    ]
+    with pytest.raises(ValueError, match="Duplicate lender_id"):
+        LenderProgram.from_lenders(dup)
+
+
+def test_apply_allocation_rejects_negative_amount() -> None:
+    prog = load_lender_program_from_csv(SAMPLE_CSV)
+    amounts = {lid: 1.0 for lid in prog.lenders}
+    amounts["L001"] = -1.0
+    with pytest.raises(ValueError, match="Negative allocation"):
+        prog.apply_loan_allocation(amounts)
+
+
+def test_apply_allocation_requires_all_lenders() -> None:
+    prog = load_lender_program_from_csv(SAMPLE_CSV)
+    amounts = {"L001": 1.0}
+    with pytest.raises(ValueError, match="missing"):
+        prog.apply_loan_allocation(amounts)
+
+
+def test_allocation_history_nan_loan_fico_stored() -> None:
+    h = AllocationHistory.empty(["X"])
+    h2 = AllocationHistory.append_row(h, loan_index=0, amounts_by_lender={"X": 1.0}, loan_fico=None)
+    assert np.isnan(float(h2["loan_fico"].iloc[0]))
+
+
+def test_load_lender_csv_empty_raises(tmp_path: Path) -> None:
+    p = tmp_path / "empty.csv"
+    p.write_text("lender_id,name,total_commitment\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="no rows"):
+        load_lender_program_from_csv(p)
+
+
+def test_load_lender_csv_missing_column_raises(tmp_path: Path) -> None:
+    p = tmp_path / "bad.csv"
+    p.write_text("lender_id,name\nA,Alice\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="missing required columns"):
+        load_lender_program_from_csv(p)
+
+
+def test_load_lender_csv_non_positive_total_raises(tmp_path: Path) -> None:
+    p = tmp_path / "bad.csv"
+    p.write_text("lender_id,name,total_commitment\nA,Alice,0\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="total_commitment must be positive"):
+        load_lender_program_from_csv(p)
+
+
+def test_load_lender_csv_remaining_exceeds_total_raises(tmp_path: Path) -> None:
+    p = tmp_path / "bad.csv"
+    p.write_text(
+        "lender_id,name,total_commitment,remaining_commitment\nA,Alice,10,20\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="cannot exceed total"):
+        load_lender_program_from_csv(p)
+
+
+def test_load_lender_csv_target_share_sum_invalid_raises(tmp_path: Path) -> None:
+    p = tmp_path / "bad.csv"
+    p.write_text(
+        "lender_id,name,total_commitment,target_share\n"
+        "A,One,10,0.1\n"
+        "B,Two,10,0.1\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="sum to"):
+        load_lender_program_from_csv(p)
+
+
+def test_load_portfolio_prior_negative_raises(tmp_path: Path) -> None:
+    p = tmp_path / "bad.csv"
+    p.write_text(
+        "lender_id,prior_funded,prior_fico_weighted\nL001,-1,0\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="non-negative"):
+        load_portfolio_prior_from_csv(p)
+
+
+def test_load_loan_tape_missing_required_columns_raises(tmp_path: Path) -> None:
+    p = tmp_path / "bad.csv"
+    p.write_text("loan_index,x\n0,1\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="loan_index and loan_fico"):
+        load_loan_tape_from_csv(p)
+
+
+def test_portfolio_prior_from_tape_missing_lender_column_raises() -> None:
+    tape = pd.DataFrame({"loan_index": [0], "loan_fico": [700.0]})
+    with pytest.raises(ValueError, match="missing columns"):
+        portfolio_prior_from_loan_tape(tape, ["L001", "L002"])

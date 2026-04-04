@@ -220,3 +220,46 @@ def test_infeasible_participation_floor_too_high() -> None:
     prog = LenderProgram.from_lenders(lenders)
     with pytest.raises(ValueError, match="participation_floor must be in"):
         allocate_loan(prog, 1.0, AllocationParams(participation_floor=0.51))
+
+
+def test_loan_amount_must_be_positive() -> None:
+    prog = load_lender_program_from_csv(SAMPLE_CSV)
+    with pytest.raises(ValueError, match="loan_amount must be positive"):
+        allocate_loan(prog, 0.0, AllocationParams())
+    with pytest.raises(ValueError, match="loan_amount must be positive"):
+        allocate_loan(prog, -1.0, AllocationParams())
+
+
+def test_gamma_zero_fairness_mode_none() -> None:
+    prog = load_lender_program_from_csv(SAMPLE_CSV)
+    res = allocate_loan(prog, 4.0, AllocationParams(gamma_fico=0.0, participation_floor=0.05))
+    assert res.fico_fairness_mode == "none"
+
+
+def test_participation_floor_exceeds_remaining_per_lender_cap() -> None:
+    """One lender's remaining/L is below the floor → infeasible before solve."""
+    from shimi.data.models import LenderProgram, LenderState
+
+    lenders = [
+        LenderState(
+            lender_id="Tight",
+            name="Tight",
+            total_commitment=10.0,
+            remaining_commitment=1.0,
+            target_share=0.5,
+            is_contractual_originator=False,
+            avg_fico=720.0,
+        ),
+        LenderState(
+            lender_id="Deep",
+            name="Deep",
+            total_commitment=100.0,
+            remaining_commitment=100.0,
+            target_share=0.5,
+            is_contractual_originator=False,
+            avg_fico=720.0,
+        ),
+    ]
+    prog = LenderProgram.from_lenders(lenders)
+    with pytest.raises(ValueError, match="Participation floor exceeds remaining"):
+        allocate_loan(prog, 10.0, AllocationParams(alpha=1.0, beta=0.0, participation_floor=0.15))
