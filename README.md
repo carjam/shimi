@@ -10,6 +10,9 @@ Shimi/
 │   └── shimi_app.py       # Main Streamlit app
 ├── data/
 │   └── sample_lenders.csv # Starter lender dataset
+├── docs/
+│   ├── spec/              # Requirements, architecture, glossary
+│   └── notes/             # Draft / scratch markdown
 ├── notebooks/
 │   └── prototype.ipynb    # Initial experimentation
 ├── requirements.txt
@@ -17,6 +20,10 @@ Shimi/
 ├── .gitignore
 └── LICENSE
 ```
+
+## Documentation
+
+Spec-driven material lives under [docs/spec/](docs/spec/). Start with [requirements](docs/spec/requirements.md), [architecture](docs/spec/architecture.md), and [glossary](docs/spec/glossary.md). Informal notes go in [docs/notes/](docs/notes/).
 
 ## Setup
 
