@@ -40,7 +40,15 @@ Shimi/
 
 ## Documentation
 
-Spec-driven material lives under [docs/spec/](docs/spec/). Start with [requirements](docs/spec/requirements.md), [architecture](docs/spec/architecture.md), and [glossary](docs/spec/glossary.md). Informal notes go in [docs/notes/](docs/notes/).
+**Specification** ([docs/spec/](docs/spec/)): authoritative product and technical intent for Shimi. Update these when scope or design changes; link to them from pull requests when behavior is spec-driven.
+
+| Document | Purpose |
+|----------|---------|
+| [requirements.md](docs/spec/requirements.md) | Goals, users, constraints, acceptance criteria |
+| [architecture.md](docs/spec/architecture.md) | Components, data flow, dependencies, key decisions |
+| [glossary.md](docs/spec/glossary.md) | Domain terms and definitions |
+
+Scratch notes and drafts live in [docs/notes/](docs/notes/).
 
 Sample CSVs under [data/](data/) are described in [data/README.md](data/README.md): lender book, loan tape (one `loan_fico` per row), and optional portfolio priors for γ. Use `load_loan_tape_from_csv`, `load_portfolio_prior_from_csv`, and `portfolio_prior_from_loan_tape` from `shimi.data`.
 
@@ -95,9 +103,11 @@ A compact mathematical picture of what `shimi.allocation` implements—useful if
 
 - **Full allocation:** $\displaystyle\sum_{i=1}^n s_i = 1$.
 - **Capacity:** $\displaystyle s_i \le \frac{r_i}{L}$ where $r_i$ is remaining commitment.
-- **Participation floor:** $s_i \ge f$ for all $i$ (e.g. $f = 0.05$).
+- **Participation floor:** $s_i \ge f_{\mathrm{floor}}$ for all $i$ (e.g. $f_{\mathrm{floor}} = 0.05$).
 
 The feasible set is an intersection of an affine hyperplane and axis-aligned bounds—a **polytope**. If it is empty (e.g. floors too high, or aggregate remaining $< L$), the problem is **infeasible**.
+
+**Symbols:** $f_{\mathrm{floor}}$ is the participation floor (minimum share per lender). $f_{\mathrm{loan}}$ is this loan’s representative FICO used in Term C—distinct from $f_{\mathrm{floor}}$.
 
 ### Objective
 
@@ -113,11 +123,11 @@ where $t_i$ are **target shares** (e.g. from commitment mix). Expanding gives te
 
 $$\beta \sum_{i \in \mathrm{CO}} \left(\frac{L s_i}{r_i}\right)^2$$
 
-For contractual originators (CO), penalize squared **utilization** of remaining line. Each summand is proportional to $s_i^2$—again **quadratic**.
+For lenders flagged as **contractual originators** (CO), penalize squared **utilization** of remaining line. Each summand is proportional to $s_i^2$—again **quadratic**. If $\beta = 0$ or there are **no** CO lenders, this term is omitted (nothing to penalize).
 
 **Term C — $\gamma$ (FICO / fair dealing):**
 
-One loan-level FICO $f$. **Cold start** (no useful cumulative prior): $\gamma (f/850)^2 \lVert s - u \rVert^2$ with $u_i = 1/n$. **With portfolio prior:** let $A_i$, $F_i$ be funded face and FICO-weighted face before the loan, $\mu = \sum_i F_i / \sum_i A_i$ the group weighted-average FICO, and $x_i = L s_i$. The code penalizes $\sum_i \bigl((F_i - \mu A_i) + x_i(f-\mu)\bigr)^2$ (scaled in implementation for numerics)—again a sum of **squares of affine functions of $s$**, hence quadratic in $s$.
+One loan-level representative FICO $f_{\mathrm{loan}}$ (same meaning as `loan_fico` in code). **Cold start** (no useful cumulative prior): $\gamma \,(f_{\mathrm{loan}}/850)^2\, \lVert s - u \rVert^2$ with $u_i = 1/n$ and $850$ as a fixed scale constant. **With portfolio prior:** let $A_i$, $F_i$ be **funded face** and **FICO-weighted face** ($\sum \text{face} \times \text{FICO}$) for lender $i$ before this loan, $\mu = (\sum_i F_i) / (\sum_i A_i)$ the **group** weighted-average FICO before the loan, and $x_i = L s_i$. The objective uses a sum of squares of $(F_i - \mu A_i) + x_i(f_{\mathrm{loan}} - \mu)$ in $s$ (**scaled in code for numerics**)—again quadratic in $s$. **Implementation note:** if $f_{\mathrm{loan}} \approx \mu$ (within a small tolerance), the portfolio branch does not apply that scaled term and the engine uses the **cold-start** equal-share $\gamma$ form instead.
 
 **Ridge:** $\mathrm{ridge}\,\lVert s\rVert^2$ for well-posedness and numerics.
 
@@ -138,7 +148,7 @@ Here the **constraints** are linear in $s$, but the **objective** contains **squ
 
 ### Solver stack
 
-**CVXPY** builds the problem; **OSQP** solves **convex QPs** with linear equalities and inequalities efficiently. Policy lives in $(\alpha,\beta,\gamma,f,\ldots)$; the solver returns the best feasible $s$.
+**CVXPY** builds the problem; **OSQP** solves **convex QPs** with linear equalities and inequalities efficiently. Policy lives in $(\alpha,\beta,\gamma,f_{\mathrm{floor}},\mathrm{ridge},\ldots)$ plus optional cumulative priors and $f_{\mathrm{loan}}$; the solver returns the best feasible $s$.
 
 ## Setup
 
