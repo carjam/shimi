@@ -83,54 +83,62 @@ Under the hood we use **CVXPY** with the **OSQP** solver—mature, open-source b
 
 Shimi here is a **simulation and transparency layer**: it shows how a disciplined, constraint-first allocation behaves under different priorities. It is **not** claiming to replace legal documentation, credit committees, or production treasury systems—but it **does** demonstrate that a stakeholder-friendly, auditable allocation workflow can sit on top of clear rules and transparent tuning.
 
-## Technical primer: the per-loan model (1–3)
+## Technical primer: the per-loan model
 
 A compact mathematical picture of what `shimi.allocation` implements—useful if you are comfortable with vectors, basic optimization, and want to connect the code to equations.
 
-### 1. What problem are we solving?
+### Problem setup
 
-For one new loan of face $L$ and $n$ lenders, choose **shares** $s_1,\ldots,s_n$ so lender $i$ takes amount $x_i = L\,s_i$.
+**Decision variables:** shares $s \in \mathbb{R}^n$, where $s_i$ is lender $i$’s fraction of the current loan. Dollar amounts follow $x_i = L\,s_i$ for loan face $L > 0$.
 
-**Hard constraints (feasible set):**
+**Constraints (all linear in $s$):**
 
-- **Full allocation:** $\sum_i s_i = 1$.
-- **Capacity:** $s_i \le r_i / L$ where $r_i$ is remaining commitment.
+- **Full allocation:** $\displaystyle\sum_{i=1}^n s_i = 1$.
+- **Capacity:** $\displaystyle s_i \le \frac{r_i}{L}$ where $r_i$ is remaining commitment.
 - **Participation floor:** $s_i \ge f$ for all $i$ (e.g. $f = 0.05$).
 
-These are linear equalities and inequalities; the feasible set is a **polytope**. If it is empty (floors too high, aggregate remaining $< L$, etc.), the problem is declared infeasible.
+The feasible set is an intersection of an affine hyperplane and axis-aligned bounds—a **polytope**. If it is empty (e.g. floors too high, or aggregate remaining $< L$), the problem is **infeasible**.
 
-### 2. What are we optimizing?
+### Objective
 
-We minimize a **sum of convex quadratic penalties** in $s$. Weights $\alpha$, $\beta$, $\gamma$ (and a tiny ridge) set how strongly each preference matters.
+We minimize a **sum of nonnegative weighted squared terms** in $s$. Scalars $\alpha$, $\beta$, $\gamma$, and $\mathrm{ridge}$ set how strongly each preference matters.
 
 **Term A — $\alpha$ (target mix):**
 
 $$\alpha \,\lVert s - t \rVert^2 = \alpha \sum_i (s_i - t_i)^2$$
 
-where $t_i$ are **target shares** (e.g. from commitment mix). Large $\alpha$ keeps this loan’s split close to the agreed risk distribution.
+where $t_i$ are **target shares** (e.g. from commitment mix). Expanding gives terms in $s_i^2$ and $s_i$—**quadratic** in $s$.
 
 **Term B — $\beta$ (contractual originator utilization):**
 
-For lenders flagged as contractual originators (CO), penalize squared **utilization** of their remaining line:
-
 $$\beta \sum_{i \in \mathrm{CO}} \left(\frac{L s_i}{r_i}\right)^2$$
 
-Large $\beta$ discourages taking a big fraction of a CO’s remaining capacity when others can absorb more.
+For contractual originators (CO), penalize squared **utilization** of remaining line. Each summand is proportional to $s_i^2$—again **quadratic**.
 
 **Term C — $\gamma$ (FICO / fair dealing):**
 
-One scalar $f$ is the loan’s representative FICO. Two regimes:
+One loan-level FICO $f$. **Cold start** (no useful cumulative prior): $\gamma (f/850)^2 \lVert s - u \rVert^2$ with $u_i = 1/n$. **With portfolio prior:** let $A_i$, $F_i$ be funded face and FICO-weighted face before the loan, $\mu = \sum_i F_i / \sum_i A_i$ the group weighted-average FICO, and $x_i = L s_i$. The code penalizes $\sum_i \bigl((F_i - \mu A_i) + x_i(f-\mu)\bigr)^2$ (scaled in implementation for numerics)—again a sum of **squares of affine functions of $s$**, hence quadratic in $s$.
 
-- **Cold start (no useful portfolio prior):** nudge toward equal shares $u_i = 1/n$, scaled by loan FICO, e.g. $\gamma (f/850)^2 \lVert s - u \rVert^2$.
-- **With a portfolio prior:** cumulative funded $A_i$ and $\Sigma(\text{face}\times\text{FICO})$ per lender define a group average $\mu$ before the loan; the code penalizes squared imbalances built from how each lender’s **post-deal** FICO-mass relates to moving toward a **common** portfolio average (still quadratic in $s$ because $x_i = L s_i$ is linear).
+**Ridge:** $\mathrm{ridge}\,\lVert s\rVert^2$ for well-posedness and numerics.
 
-**Ridge:** a small $\mathrm{ridge}\,\lVert s\rVert^2$ keeps the problem well-posed if other weights are zero and helps numerics.
+**Standard form:** The whole objective can be written as
 
-### 3. Why quadratic programming (QP) and OSQP?
+$$\min_{s} \quad \tfrac{1}{2} s^\top P s + q^\top s + c$$
 
-The objective is a **convex quadratic** and the constraints are **linear**—that is a **convex QP**. Convexity means any local minimum is **global**; the structure is the same family as least squares with linear constraints (KKT conditions: linear algebra plus complementarity for active inequalities).
+with $P \succeq 0$ (positive semidefinite), because it is a sum of squares with nonnegative weights—a **convex quadratic** function of $s$.
 
-**CVXPY** models the problem; **OSQP** solves it efficiently. This is transparent, reproducible optimization—not a learned black box: policy lives in $(\alpha,\beta,\gamma,f,\ldots)$; the solver finds the best feasible split.
+### Why quadratic programming (QP), not linear programming (LP)?
+
+- **Linear programming (LP)** minimizes a **linear** objective $c^\top s$ subject to linear constraints.
+- **Quadratic programming (QP)** minimizes a **convex quadratic** $\tfrac{1}{2}s^\top P s + q^\top s$ subject to **linear** constraints.
+
+Here the **constraints** are linear in $s$, but the **objective** contains **squares of the decision variables** (and squares of affine functions of $s$). That is exactly **QP**. If the objective were only linear in $s$, the same feasible set would define an **LP**—but then you could not express least-squares-style trade-offs (target fit, squared utilization, etc.) without changing the problem class.
+
+**Convexity:** With $P \succeq 0$, any local minimum is **global** (same structural family as constrained least squares; KKT conditions apply).
+
+### Solver stack
+
+**CVXPY** builds the problem; **OSQP** solves **convex QPs** with linear equalities and inequalities efficiently. Policy lives in $(\alpha,\beta,\gamma,f,\ldots)$; the solver returns the best feasible $s$.
 
 ## Setup
 
