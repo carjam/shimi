@@ -105,7 +105,7 @@ Shimi here is a **simulation and transparency layer**: it shows how a discipline
 
 **Linear constraints** (defining the closed convex **polytope** $\mathcal{F} \subset \mathbb{R}^n$):
 
-$$\mathcal{F} = \left\{ s \in \mathbb{R}^n \;\middle|\; \mathbf{1}^\top s = 1,\quad f_{\mathrm{floor}} \le s_i \le \frac{r_i}{L}\ \forall i \right\}.$$
+$$\mathcal{F} = \{\, s \in \mathbb{R}^n \mid \mathbf{1}^\top s = 1,\quad f_{\mathrm{floor}} \le s_i \le \frac{r_i}{L}\quad \forall i \,\}.$$
 
 Here $r_i$ is remaining commitment for lender $i$, and $f_{\mathrm{floor}} \in [0,1/n]$ is the participation floor (e.g. $0.05$). If $\mathcal{F} = \emptyset$ (e.g. floors too high, or aggregate remaining capacity $< L$), the problem is **infeasible**.
 
