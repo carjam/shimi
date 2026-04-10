@@ -115,6 +115,24 @@ def _lender_qualitative_colors() -> list[str]:
     return base + list(extra)
 
 
+def _strictly_increasing_timestamps(ts: list[pd.Timestamp]) -> list[pd.Timestamp]:
+    """Plotly date axes draw vertical segments when consecutive x values are equal or map to the same pixel.
+
+    Microsecond nudges are invisible on a day-scale axis (x collapses), so lines look vertical. Use a
+    sub-day step large enough to separate points on the plot while preserving calendar ordering.
+    """
+    if len(ts) < 2:
+        return ts
+    min_step = pd.Timedelta(hours=12)
+    out: list[pd.Timestamp] = [ts[0]]
+    for i in range(1, len(ts)):
+        t = ts[i]
+        if t <= out[-1]:
+            t = out[-1] + min_step
+        out.append(t)
+    return out
+
+
 def _fig_remaining_trajectory_loans(
     trajectory: list[dict[str, float]],
     lender_ids: list[str],
@@ -209,6 +227,7 @@ def _fig_remaining_trajectory_dates(
                 pd.Timestamp(first_loan_date + timedelta(days=interval_days * j))
                 for j in range(len(trajectory) - 1)
             ]
+            xs = _strictly_increasing_timestamps(xs)
             ys = [float(trajectory[0][lid])] + [
                 float(trajectory[j + 1][lid]) for j in range(len(trajectory) - 1)
             ]
