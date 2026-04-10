@@ -401,6 +401,22 @@ def main() -> None:
             step=1.0,
         )
 
+        with st.expander("Contractual originators (β)", expanded=False):
+            st.caption(
+                "Lenders checked here are **contractual originators**: the **β** term penalizes using a large "
+                "share of their **remaining** line. You can mark **several** lenders; each row is independent."
+            )
+            for lid in ids:
+                st.checkbox(
+                    f"{program.lenders[lid].name} (`{lid}`)",
+                    value=program.lenders[lid].is_contractual_originator,
+                    key=f"co_{lid}",
+                )
+        for lid in ids:
+            program.lenders[lid].is_contractual_originator = bool(
+                st.session_state.get(f"co_{lid}", program.lenders[lid].is_contractual_originator)
+            )
+
         portfolio_prior: PortfolioPrior | None = None
         prior_source = "none"
         with st.expander("Portfolio prior (γ)", expanded=False):
@@ -577,9 +593,18 @@ def main() -> None:
             },
             inplace=True,
         )
+        # Booleans in st.dataframe render as disabled checkboxes (often styled red); use text for read-only status.
+        show["contractual"] = show["contractual"].map(lambda b: "Yes" if bool(b) else "No")
+        st.caption(
+            "**Contractual** in this table reflects the flags under **Inputs → Contractual originators (β)** (not editable here)."
+        )
         st.dataframe(
             show,
             column_config={
+                "contractual": st.column_config.TextColumn(
+                    "Contractual",
+                    help="Whether this lender is treated as a contractual originator for β. Change under Inputs.",
+                ),
                 "target_share": st.column_config.NumberColumn("Target share", format="%.2f"),
                 "model_share": st.column_config.NumberColumn("Model share", format="%.2f"),
                 "Δ share (pp)": st.column_config.NumberColumn(format="%.2f"),
