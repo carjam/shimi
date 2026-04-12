@@ -308,17 +308,86 @@ def _post_loan_portfolio_avg(
     return pd.DataFrame(rows)
 
 
+def _executive_summary_bullets(
+    alpha: float,
+    beta: float,
+    gamma: float,
+    *,
+    has_portfolio_prior: bool,
+) -> list[str]:
+    """Short narrative lines for executive demo mode."""
+    a, b, g = float(alpha), float(beta), float(gamma)
+    lines: list[str] = []
+    if a >= b and a >= g and a > 1e-6:
+        lines.append(
+            "**Per-lender target allocation (α)** leads — the split stays closest to **agreed commitment mix**."
+        )
+    elif b > a and b >= g and b > 1e-6:
+        lines.append(
+            "**Allocation balance (β)** leads — **contractual originators** see lighter use of their **remaining lines** when the math allows."
+        )
+    elif g > a and g > b and g > 1e-6:
+        if has_portfolio_prior:
+            lines.append(
+                "**Risk uniformity (γ)** leads — the engine nudges **portfolio credit quality** toward balance across lenders."
+            )
+        else:
+            lines.append(
+                "**Risk uniformity (γ)** is active; load a **portfolio prior** under γ settings for full cross-lender effect."
+            )
+    else:
+        lines.append(
+            "α, β, and γ are in a **similar range** — nudge **Importance** to stress-test a story (targets vs lines vs risk)."
+        )
+    lines.append(
+        f"**Weights:** α={a:g}, β={b:g}, γ={g:g} · **Outputs** below are **dollars and shares per lender** on this loan."
+    )
+    return lines
+
+
+def _init_shimi_input_state(
+    *,
+    default_loan: float,
+    f_mean: float,
+) -> None:
+    """One-time defaults for keyed inputs (presets + stable widget state)."""
+    if "shimi_loan_amt" not in st.session_state:
+        st.session_state.shimi_loan_amt = float(default_loan)
+    if "shimi_floor" not in st.session_state:
+        st.session_state.shimi_floor = 0.05
+    if "shimi_loan_fico" not in st.session_state:
+        st.session_state.shimi_loan_fico = float(f_mean)
+    if "shimi_alpha" not in st.session_state:
+        st.session_state.shimi_alpha = 1.0
+    if "shimi_beta" not in st.session_state:
+        st.session_state.shimi_beta = 0.25
+    if "shimi_gamma" not in st.session_state:
+        st.session_state.shimi_gamma = 0.0
+
+
 def main() -> None:
     st.set_page_config(page_title="Shimi", layout="wide")
     st.title("Shimi")
-    st.caption("Capital Concentration Decision Engine — 資本密度意思決定エンジン")
-    st.write(
-        "Interactive loan allocation simulator — lender book, optional **loan tape**, and **portfolio "
-        "priors** load from `data/` (see `data/README.md`). Open **View source data** for CSV snapshots. "
-        "**Inputs** are on the **left**; **live output** (metrics and charts) stays on the **right** so you can "
-        "dial parameters and see impact without scrolling. If `sample_allocation_history.csv` is present, past "
-        "loans are **replayed** into the book so **remaining lines**, **History metrics**, and **exhaustion** align."
+    exec_mode = st.toggle(
+        "Executive demo mode",
+        value=True,
+        key="shimi_exec_mode",
+        help="Plain-language summary, scenario presets, and technical metrics tucked into “Model diagnostics.”",
     )
+    st.caption("Capital Concentration Decision Engine — 資本密度意思決定エンジン")
+    if exec_mode:
+        st.write(
+            "**Shimi** recommends how to **split a loan across lenders** under your rules. "
+            "Adjust **Values** and **Importance** on the left; the **recommended allocation** updates on the right."
+        )
+    else:
+        st.write(
+            "Interactive loan allocation simulator — lender book, optional **loan tape**, and **portfolio "
+            "priors** load from `data/` (see `data/README.md`). Open **View source data** for CSV snapshots. "
+            "**Inputs** are on the **left**; **live output** (metrics and charts) stays on the **right** so you can "
+            "dial parameters and see impact without scrolling. If `sample_allocation_history.csv` is present, past "
+            "loans are **replayed** into the book so **remaining lines**, **History metrics**, and **exhaustion** align."
+        )
 
     if not LENDERS_CSV.exists():
         st.info(f"No lender file at `{LENDERS_CSV}`. Add `data/sample_lenders.csv` to load the app.")
@@ -339,7 +408,7 @@ def main() -> None:
             st.warning(f"Could not replay `{HISTORY_CSV.name}`: {e}")
 
     loan_tape_df: pd.DataFrame | None = None
-    with st.expander("View source data (lenders & loan tape)", expanded=False):
+    with st.expander("View source data (lenders & loan tape)", expanded=not exec_mode):
         st.subheader("Lender program (`sample_lenders.csv`)")
         st.dataframe(program.to_dataframe(), use_container_width=True)
         st.caption(
@@ -365,7 +434,16 @@ def main() -> None:
             loan_tape_df = None
 
     st.subheader("Simulation workspace")
-    st.caption("Wide layout: adjust sliders in the left column while metrics and charts update on the right.")
+    if exec_mode:
+        st.caption(
+            "Left: **Values** (this loan) and **Importance** (how hard to enforce each goal). "
+            "Right: **recommended split** and charts."
+        )
+    else:
+        st.caption(
+            "Wide layout: set **Values** (loan terms) and **Importance** (α, β, γ weights) on the left; "
+            "metrics and charts update on the right."
+        )
 
     inp_col, out_col = st.columns([0.34, 0.66], gap="large")
 
@@ -373,32 +451,76 @@ def main() -> None:
         st.markdown("##### Inputs")
         total_rem = sum(l.remaining_commitment for l in program.lenders.values())
         default_loan = min(10.0, max(1.0, 0.05 * total_rem))
+        f_mean = float(program.to_dataframe()["avg_fico"].mean())
+        _init_shimi_input_state(default_loan=default_loan, f_mean=f_mean)
+
+        if exec_mode:
+            st.caption("**Quick scenarios** — sets α, β, γ (adjust after if needed).")
+            p1, p2, p3 = st.columns(3)
+            with p1:
+                if st.button("Balanced", use_container_width=True, key="preset_balanced"):
+                    st.session_state.shimi_alpha = 1.0
+                    st.session_state.shimi_beta = 0.25
+                    st.session_state.shimi_gamma = 0.5
+            with p2:
+                if st.button("Protect originators", use_container_width=True, key="preset_originators"):
+                    st.session_state.shimi_alpha = 0.75
+                    st.session_state.shimi_beta = 12.0
+                    st.session_state.shimi_gamma = 0.25
+            with p3:
+                if st.button("Risk uniformity", use_container_width=True, key="preset_risk"):
+                    st.session_state.shimi_alpha = 0.75
+                    st.session_state.shimi_beta = 0.25
+                    st.session_state.shimi_gamma = 6.0
+
+        st.markdown("###### Values")
+        st.caption("Concrete terms for this loan (amount, floor, and credit score).")
         loan_amt = st.slider(
             "Loan amount",
             min_value=0.0,
             max_value=float(total_rem),
-            value=float(default_loan),
             step=0.5,
+            key="shimi_loan_amt",
             help="Total face to allocate; must not exceed aggregate remaining commitment.",
         )
-        floor = st.slider("Participation floor (share)", 0.0, 0.2, 0.05, 0.01)
-        alpha = st.slider("α — target share fit", 0.0, 20.0, 1.0, 0.1)
-        beta = st.slider("β — contractual utilization", 0.0, 20.0, 0.25, 0.05)
-        gamma_fico = st.slider(
-            "γ — portfolio FICO fair dealing",
+        floor = st.slider(
+            "Participation floor (share)",
             0.0,
-            10.0,
-            0.0,
-            0.1,
-            help="With a portfolio prior: rebalances cross-lender portfolio avg FICO. Without: equal-share proxy.",
+            0.2,
+            step=0.01,
+            key="shimi_floor",
         )
-        f_mean = float(program.to_dataframe()["avg_fico"].mean())
         loan_fico = st.number_input(
             "Loan FICO",
             min_value=300.0,
             max_value=850.0,
-            value=f_mean,
             step=1.0,
+            key="shimi_loan_fico",
+        )
+
+        st.markdown("###### Importance")
+        st.caption("How strongly each optimization goal is weighted (higher = more influence on the split).")
+        alpha = st.slider(
+            "α — per lender target allocation",
+            0.0,
+            20.0,
+            step=0.1,
+            key="shimi_alpha",
+        )
+        beta = st.slider(
+            "β — allocation balance",
+            0.0,
+            20.0,
+            step=0.05,
+            key="shimi_beta",
+        )
+        gamma_fico = st.slider(
+            "γ — risk uniformity",
+            0.0,
+            10.0,
+            step=0.1,
+            key="shimi_gamma",
+            help="With a portfolio prior: rebalances cross-lender portfolio avg FICO. Without: equal-share proxy.",
         )
 
         with st.expander("Contractual originators (β)", expanded=False):
@@ -495,9 +617,16 @@ def main() -> None:
                     hide_index=True,
                     use_container_width=True,
                 )
-                st.caption(f"Active prior source: **{prior_source}** · Increase γ to emphasize portfolio fair-dealing.")
+                st.caption(
+                    f"Active prior source: **{prior_source}** · "
+                    + (
+                        "Higher **γ** tightens **risk uniformity** across lenders when a prior is loaded."
+                        if exec_mode
+                        else "Increase γ to emphasize portfolio fair-dealing."
+                    )
+                )
 
-    _chart_h = 268
+    _chart_h = 320 if exec_mode else 268
 
     with out_col:
         st.markdown("##### Live output")
@@ -535,40 +664,8 @@ def main() -> None:
         total_alloc = float(amounts.sum())
         mae_vs_target = float(np.mean(np.abs(model_sh - target_sh)))
         rmse_vs_target = float(np.sqrt(np.mean((model_sh - target_sh) ** 2)))
-
-        if result.is_optimal:
-            st.success("Solver finished with an **optimal** (or optimal-inaccurate) QP solution.")
-        else:
-            st.warning(f"Solver status: **{result.solver_status}** — review the numbers before relying on them.")
-
-        r1a, r1b, r1c = st.columns(3)
-        r1a.metric("Total allocated", f"{total_alloc:.2f}")
-        r1a.caption(f"Loan: {loan_amt:.2f}")
-        if abs(total_alloc - loan_amt) > 1e-3:
-            st.warning("Allocated total differs from the loan amount — check solver / tolerances.")
-        r1b.metric(
-            "Mean |share − target|",
-            f"{mae_vs_target:.3f}",
-            help="Lower means closer to commitment mix (α effect).",
-        )
-        r1c.metric("RMSE (share vs target)", f"{rmse_vs_target:.3f}")
-        r2a, r2b = st.columns(2)
         obj = result.objective_value
-        r2a.metric("Objective value", f"{obj:.4g}" if obj is not None else "n/a")
-        r2b.metric("γ FICO mode", result.fico_fairness_mode)
-        r2b.caption(f"Loan FICO **{result.loan_fico:.0f}**")
 
-        st.markdown("**Charts**")
-        ch1, ch2 = st.columns(2)
-        with ch1:
-            st.plotly_chart(
-                _fig_target_vs_suggested(names, target_sh, model_sh, height=_chart_h),
-                use_container_width=True,
-            )
-        with ch2:
-            st.plotly_chart(_fig_amounts(names, amounts, height=_chart_h), use_container_width=True)
-
-        st.markdown("**Detail table**")
         show = out[
             [
                 "lender_id",
@@ -593,30 +690,127 @@ def main() -> None:
             },
             inplace=True,
         )
-        # Booleans in st.dataframe render as disabled checkboxes (often styled red); use text for read-only status.
         show["contractual"] = show["contractual"].map(lambda b: "Yes" if bool(b) else "No")
-        st.caption(
-            "**Contractual** in this table reflects the flags under **Inputs → Contractual originators (β)** (not editable here)."
-        )
-        st.dataframe(
-            show,
-            column_config={
-                "contractual": st.column_config.TextColumn(
-                    "Contractual",
-                    help="Whether this lender is treated as a contractual originator for β. Change under Inputs.",
-                ),
-                "target_share": st.column_config.NumberColumn("Target share", format="%.2f"),
-                "model_share": st.column_config.NumberColumn("Model share", format="%.2f"),
-                "Δ share (pp)": st.column_config.NumberColumn(format="%.2f"),
-                "amount": st.column_config.NumberColumn(format="%.2f"),
-                "% of remaining line": st.column_config.NumberColumn(format="%.1f"),
-                "face×FICO (this loan)": st.column_config.NumberColumn(format="%.0f"),
-            },
-            hide_index=True,
-            use_container_width=True,
-        )
 
-        with st.expander("History metrics", expanded=False):
+        _detail_caption = (
+            "**Contractual** in this table reflects the flags under **Inputs → Contractual originators (β)** "
+            "(not editable here)."
+        )
+        _detail_column_config = {
+            "contractual": st.column_config.TextColumn(
+                "Contractual",
+                help="Whether this lender is treated as a contractual originator for β. Change under Inputs.",
+            ),
+            "target_share": st.column_config.NumberColumn("Target share", format="%.2f"),
+            "model_share": st.column_config.NumberColumn("Model share", format="%.2f"),
+            "Δ share (pp)": st.column_config.NumberColumn(format="%.2f"),
+            "amount": st.column_config.NumberColumn(format="%.2f"),
+            "% of remaining line": st.column_config.NumberColumn(format="%.1f"),
+            "face×FICO (this loan)": st.column_config.NumberColumn(format="%.0f"),
+        }
+
+        if exec_mode:
+            if result.is_optimal:
+                st.success(
+                    "**Recommendation ready** — a feasible split under your floor and each lender’s remaining line."
+                )
+            else:
+                st.warning(
+                    f"**Check this run** — solver status: **{result.solver_status}**. "
+                    "Confirm numbers before using them."
+                )
+
+            st.markdown("**At a glance**")
+            for line in _executive_summary_bullets(
+                alpha,
+                beta,
+                gamma_fico,
+                has_portfolio_prior=portfolio_prior is not None,
+            ):
+                st.markdown(f"- {line}")
+
+            ek1, ek2, ek3 = st.columns(3)
+            ek1.metric("Loan amount", f"{loan_amt:.2f}")
+            ek2.metric("Total allocated", f"{total_alloc:.2f}")
+            ek2.caption("Should match loan amount")
+            ek3.metric("Deviation from agreed mix (avg)", f"{mae_vs_target:.3f}")
+            ek3.caption("Gap vs commitment-based targets · lower is closer")
+            if abs(total_alloc - loan_amt) > 1e-3:
+                st.warning("Allocated total differs from the loan amount — check solver / tolerances.")
+
+            st.markdown("**Charts**")
+            ch1, ch2 = st.columns(2)
+            with ch1:
+                st.plotly_chart(
+                    _fig_target_vs_suggested(names, target_sh, model_sh, height=_chart_h),
+                    use_container_width=True,
+                )
+            with ch2:
+                st.plotly_chart(_fig_amounts(names, amounts, height=_chart_h), use_container_width=True)
+
+            with st.expander("Model diagnostics", expanded=False):
+                d1, d2, d3 = st.columns(3)
+                d1.metric(
+                    "RMSE (share vs target)",
+                    f"{rmse_vs_target:.3f}",
+                )
+                d2.metric("Objective value", f"{obj:.4g}" if obj is not None else "n/a")
+                d3.metric("γ FICO mode", str(result.fico_fairness_mode))
+                d3.caption(f"Loan FICO **{result.loan_fico:.0f}**")
+
+            with st.expander("Lender detail table", expanded=False):
+                st.caption(_detail_caption)
+                st.dataframe(
+                    show,
+                    column_config=_detail_column_config,
+                    hide_index=True,
+                    use_container_width=True,
+                )
+        else:
+            if result.is_optimal:
+                st.success("Solver finished with an **optimal** (or optimal-inaccurate) QP solution.")
+            else:
+                st.warning(f"Solver status: **{result.solver_status}** — review the numbers before relying on them.")
+
+            r1a, r1b, r1c = st.columns(3)
+            r1a.metric("Total allocated", f"{total_alloc:.2f}")
+            r1a.caption(f"Loan: {loan_amt:.2f}")
+            if abs(total_alloc - loan_amt) > 1e-3:
+                st.warning("Allocated total differs from the loan amount — check solver / tolerances.")
+            r1b.metric(
+                "Mean |share − target|",
+                f"{mae_vs_target:.3f}",
+                help="Lower means closer to commitment mix (α effect).",
+            )
+            r1c.metric("RMSE (share vs target)", f"{rmse_vs_target:.3f}")
+            r2a, r2b = st.columns(2)
+            r2a.metric("Objective value", f"{obj:.4g}" if obj is not None else "n/a")
+            r2b.metric("γ FICO mode", result.fico_fairness_mode)
+            r2b.caption(f"Loan FICO **{result.loan_fico:.0f}**")
+
+            st.markdown("**Charts**")
+            ch1, ch2 = st.columns(2)
+            with ch1:
+                st.plotly_chart(
+                    _fig_target_vs_suggested(names, target_sh, model_sh, height=_chart_h),
+                    use_container_width=True,
+                )
+            with ch2:
+                st.plotly_chart(_fig_amounts(names, amounts, height=_chart_h), use_container_width=True)
+
+            st.markdown("**Detail table**")
+            st.caption(_detail_caption)
+            st.dataframe(
+                show,
+                column_config=_detail_column_config,
+                hide_index=True,
+                use_container_width=True,
+            )
+
+        with st.expander(
+            "History metrics (analyst)" if exec_mode else "History metrics",
+            expanded=False,
+        ):
             st.caption(
                 "**Gini** measures concentration of each loan’s split across lenders (0 = even, higher = more skewed). "
                 "**Cumulative funded** sums face from past rows. If `sample_allocation_history.csv` was replayed at "
@@ -668,7 +862,10 @@ def main() -> None:
                     use_container_width=True,
                 )
 
-        with st.expander("Capital exhaustion forecast", expanded=False):
+        with st.expander(
+            "Capital exhaustion forecast (analyst)" if exec_mode else "Capital exhaustion forecast",
+            expanded=False,
+        ):
             st.caption(
                 "Projects when each lender’s **remaining line** hits zero if you book **repeated loans** of the "
                 "same size with the **same** α, β, γ, floor, and loan FICO. The optimizer is **re-run each loan** "
@@ -789,7 +986,11 @@ def main() -> None:
 
         post = _post_loan_portfolio_avg(portfolio_prior, result.amounts_by_lender, result.loan_fico, ids)
         if post is not None and post["avg_fico_after"].notna().any():
-            st.markdown("**After this loan** (portfolio avg FICO)")
+            st.markdown(
+                "**Portfolio avg FICO after this loan**"
+                if exec_mode
+                else "**After this loan** (portfolio avg FICO)"
+            )
             merged = show[["name", "lender_id"]].merge(post, on="lender_id")
             merged = merged[["name", "avg_fico_after"]]
             spread = float(merged["avg_fico_after"].max() - merged["avg_fico_after"].min())
@@ -802,11 +1003,15 @@ def main() -> None:
                 use_container_width=True,
             )
             st.caption(
-                f"Cross-lender spread of portfolio avg FICO after this allocation: **{spread:.1f}** points "
-                "(γ pushes this down over time when priors are loaded)."
+                f"Cross-lender spread of portfolio avg FICO after this allocation: **{spread:.1f}** points"
+                + (
+                    " — higher **γ** with a loaded prior tends to compress this spread over time."
+                    if exec_mode
+                    else " (γ pushes this down over time when priors are loaded)."
+                )
             )
 
-        with st.expander("How to read this output"):
+        with st.expander("Using this screen" if exec_mode else "How to read this output"):
             st.markdown(
                 """
 - **Target share** comes from the lender book (commitment mix). **Model share** is what the QP chose.
